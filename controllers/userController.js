@@ -152,13 +152,25 @@ exports.validateImages = (req, res, next) => {
 // Get all users
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find();
+    const { search } = req.query;
+    
+    // Create a search filter
+    const searchFilter = search 
+      ? {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } },
+            { username: { $regex: search, $options: 'i' } }
+          ]
+        }
+      : {};
+
+    const users = await User.find(searchFilter);
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
-
 // Get a specific car by ID
 exports.getUserById = async (req, res) => {
   try {
