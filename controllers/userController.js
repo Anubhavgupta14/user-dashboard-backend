@@ -1,5 +1,6 @@
-// Create a new car with images upload
-const Car = require("../models/Car");
+const { body, validationResult } = require('express-validator');
+// Create a new user with images upload
+const User = require("../models/User");
 const cloudinary = require("cloudinary").v2;
 
 const uploadBuffer = async (buffer) => {
@@ -27,27 +28,41 @@ const deleteCloudinaryImage = async (imageUrl) => {
   }
 };
 
-exports.createCar = async (req, res) => {
+//For Validation
+exports.validateUserCreation = [
+  // Name validation: Only alphabets and spaces, minimum 2 characters
+  body('name')
+    .trim()
+    .matches(/^[A-Za-z\s]+$/)
+    .withMessage('Name must contain only alphabets and spaces')
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+
+  // Phone validation: Only digits, exactly 10 digits
+  body('phone')
+    .trim()
+    .matches(/^[0-9]{10}$/)
+    .withMessage('Phone number must be exactly 10 digits'),
+
+  // Email validation: Must be a valid email format
+  body('email')
+    .trim()
+    .isEmail()
+    .withMessage('Invalid email format')
+    .normalizeEmail(),
+];
+
+exports.createUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      errors: errors.array()
+    });
+  }
   try {
-    const { title, description, tags } = req.body;
+    const { name, phone, email } = req.body;
     let images = [];
-
-    // Helper function to upload buffer data to Cloudinary
-    // const uploadBuffer = async (buffer) => {
-    //   return new Promise((resolve, reject) => {
-    //     const uploadStream = cloudinary.uploader.upload_stream(
-    //       { resource_type: 'auto' },
-    //       (error, result) => {
-    //         if (error) reject(error);
-    //         else resolve(result.secure_url);
-    //       }
-    //     );
-
-    //     uploadStream.end(buffer);
-    //   });
-    // };
-
-    // Handle image uploads
     if (req.files) {
       try {
         if (Array.isArray(req.files)) {
@@ -77,27 +92,26 @@ exports.createCar = async (req, res) => {
     }
 
     // Create new car object with processed tags
-    const car = new Car({
-      title,
-      description,
-      tags: tags ? tags.split(",").map((tag) => tag.trim()) : [],
+    const user = new User({
+      name,
+      phone,
+      email,
       images,
-      user: req.user.userId,
     });
 
-    // Save car to database
-    await car.save();
+    // Save user to database
+    await user.save();
 
     // Return success response
     res.status(201).json({
       success: true,
-      data: car,
-      message: "Car created successfully",
+      data: user,
+      message: "User created successfully",
     });
   } catch (err) {
     console.error("Server error:", err);
     res.status(500).json({
-      error: "Error creating car",
+      error: "Error creating user",
       details: err.message,
     });
   }
@@ -135,60 +149,58 @@ exports.validateImages = (req, res, next) => {
   next();
 };
 
-// Get all cars of the logged-in user
-exports.getCars = async (req, res) => {
+// Get all users
+exports.getUsers = async (req, res) => {
   try {
-    const cars = await Car.find({ user: req.user.userId });
-    res.json(cars);
+    const users = await User.find();
+    res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
 // Get a specific car by ID
-exports.getCarById = async (req, res) => {
+exports.getUserById = async (req, res) => {
   try {
-    const car = await Car.findById(req.params.id);
-    if (!car || car.user.toString() !== req.user.userId) {
-      return res.status(404).json({ error: "Car not found" });
-    }
-    res.json(car);
+    const user = await User.findById(req.params.id);
+    res.json({success:true, data:user});
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
 // Update a car's details and its images
-exports.updateCar = async (req, res) => {
+exports.updateUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      errors: errors.array()
+    });
+  }
+
   try {
-    const carId = req.params.id;
-    const { title, description, tags, keepImages } = req.body;
+    const userId = req.params.id;
+    const { name, phone, email, keepImages } = req.body;
     let images = [];
 
     // Find existing car
-    const existingCar = await Car.findById(carId);
+    const existingUser = await User.findById(userId);
 
-    if (!existingCar) {
+    if (!existingUser) {
       return res.status(404).json({
-        error: "Car not found",
-      });
-    }
-
-    // Check ownership
-    if (existingCar.user.toString() !== req.user.userId) {
-      return res.status(403).json({
-        error: "Not authorized to update this car",
+        error: "User not found",
       });
     }
 
     // Handle keeping existing images
     const keepImagesList = keepImages ? keepImages.split(",") : [];
     if (keepImagesList.length > 0) {
-      images = existingCar.images.filter((img) => keepImagesList.includes(img));
+      images = existingUser.images.filter((img) => keepImagesList.includes(img));
     }
 
     // Delete removed images from Cloudinary
-    const imagesToDelete = existingCar.images.filter(
+    const imagesToDelete = existingUser.images.filter(
       (img) => !keepImagesList.includes(img)
     );
     for (const imageUrl of imagesToDelete) {
@@ -226,15 +238,15 @@ exports.updateCar = async (req, res) => {
 
     // Prepare update data
     const updateData = {
-      title: title || existingCar.title,
-      description: description || existingCar.description,
-      tags: tags ? tags.split(",").map((tag) => tag.trim()) : existingCar.tags,
-      images: images.length > 0 ? images : existingCar.images,
+      name: name || existingUser.name,
+      phone: phone || existingUser.phone,
+      email: email || existingUser.email,
+      images: images.length > 0 ? images : existingUser.images,
       updatedAt: Date.now(),
     };
 
     // Update car in database
-    const updatedCar = await Car.findByIdAndUpdate(carId, updateData, {
+    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
       new: true,
       runValidators: true,
     });
@@ -242,32 +254,26 @@ exports.updateCar = async (req, res) => {
     // Return success response
     res.json({
       success: true,
-      data: updatedCar,
-      message: "Car updated successfully",
+      data: updatedUser,
+      message: "User updated successfully",
     });
   } catch (err) {
     console.error("Server error:", err);
     res.status(500).json({
-      error: "Error updating car",
+      error: "Error updating user",
       details: err.message,
     });
   }
 };
 
 // Delete a car by ID
-exports.deleteCar = async (req, res) => {
+exports.deleteUser = async (req, res) => {
   try {
-    const car = await Car.findById(req.params.id);
+    const car = await User.findById(req.params.id);
 
     if (!car) {
       return res.status(404).json({
-        error: "Car not found",
-      });
-    }
-
-    if (car.user.toString() !== req.user.userId) {
-      return res.status(403).json({
-        error: "Not authorized to delete this car",
+        error: "User not found",
       });
     }
 
@@ -275,16 +281,16 @@ exports.deleteCar = async (req, res) => {
       await deleteCloudinaryImage(imageUrl);
     }
 
-    await Car.findByIdAndDelete(req.params.id);
+    await User.findByIdAndDelete(req.params.id);
 
     res.json({
       success: true,
-      message: "Car and associated images deleted successfully",
+      message: "User and associated images deleted successfully",
     });
   } catch (err) {
     console.error("Server error:", err);
     res.status(500).json({
-      error: "Error deleting car",
+      error: "Error deleting user",
       details: err.message,
     });
   }
